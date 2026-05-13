@@ -62,3 +62,21 @@ done
 echo ""
 echo "Done — $total district(s) converted"
 ls -lh "$OUTPUT_DIR"/*.mbtiles
+
+# Generate config.json for tileserver-gl (relative paths — works on Windows)
+python3 << 'PYEOF'
+import json, glob, os
+output_dir = os.environ.get("OUTPUT_DIR", ".")
+files = sorted(glob.glob(os.path.join(output_dir, "*.mbtiles")))
+config = {"data": {os.path.basename(f).replace(".mbtiles",""): {"mbtiles": os.path.basename(f)} for f in files}}
+out = os.path.join(output_dir, "config.json")
+with open(out, "w") as f:
+    json.dump(config, f, indent=2)
+print(f"config.json written — {len(config['data'])} dataset(s)")
+PYEOF
+
+WIN_DIR=$(echo "$OUTPUT_DIR" | sed 's|/mnt/c|C:|' | sed 's|/|\\|g')
+echo ""
+echo "Serve on Windows CMD:"
+echo "  cd $WIN_DIR"
+echo "  tileserver-gl --config config.json --port 8081"

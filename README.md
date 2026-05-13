@@ -25,8 +25,8 @@ HPC  (172.18.1.174)
 ├── WSL Ubuntu
 │   └── convert.sh  ← runs once, produces buildings.mbtiles
 └── Windows CMD
-    └── tileserver-gl-light  ← always running, port 3000
-        └── http://172.18.1.174:3000/data/buildings/{z}/{x}/{y}.pbf
+    └── tileserver-gl  ← always running, port 8081
+        └── http://172.18.1.174:8081/data/buildings/{z}/{x}/{y}.pbf
 
 Client PC  (your official machine — limited storage, no data files)
 └── infra_portal  (React + Vite app)
@@ -129,45 +129,59 @@ Approximate time on your HPC (196 cores, NVMe):
 Install Node.js from https://nodejs.org (LTS). Then in Windows CMD:
 ```cmd
 npm install -g tileserver-gl-light
-tileserver-gl-light --version
+tileserver-gl --version
 ```
 
 That is all. No Java, no GeoServer, no GDAL on Windows side.
 
 ### 1.6 Start the tile server (Windows CMD)
 
-Point tileserver-gl-light at the **folder** — it picks up every `.mbtiles` file
-inside automatically:
+`convert.sh` generates a `config.json` in your tiles folder automatically.
+Start the server pointing at that config — it serves every district MBTiles at once:
 
 ```cmd
-tileserver-gl-light --mbtiles C:\HPC\tiles --port 3000
+cd C:\HPC\tiles
+tileserver-gl --config config.json --port 8081 --public_url http://172.18.1.174:8081
 ```
 
-Verify it works — open a browser on the HPC and visit:
-```
-http://localhost:3000/data/Abbottabad_buildings.json
-```
+Note: the npm package is called `tileserver-gl-light` but the installed binary is `tileserver-gl`.
 
-You should see JSON with `"tiles": ["http://...3000/data/Abbottabad_buildings/{z}/{x}/{y}.pbf"]`.
-Every district gets its own endpoint at the same pattern.
+The `--public_url` flag is important. Without it, when a client PC fetches
+`http://172.18.1.174:8081/data/Abbottabad_buildings.json`, the `tiles` array in the
+JSON response contains `http://localhost:8081/...` — which resolves to the client's
+own machine and fails. With the flag, the response correctly returns
+`http://172.18.1.174:8081/...` so every browser on the LAN can reach the tiles.
 
-### 1.7 Open Windows Firewall for port 3000
+Verify it works — open a browser on the HPC:
+```
+http://localhost:8081
+```
+You will see a list of all district datasets. Click any one to preview it on a map.
+
+To confirm a specific district's tile URL:
+```
+http://localhost:8081/data/Abbottabad_buildings.json
+```
+Look for `"tiles": ["http://...8081/data/Abbottabad_buildings/{z}/{x}/{y}.pbf"]`.
+Every district follows the same pattern.
+
+### 1.7 Open Windows Firewall for port 8081
 
 In Windows CMD (run as Administrator):
 ```cmd
-netsh advfirewall firewall add rule name="TileServer3000" dir=in action=allow protocol=TCP localport=3000
+netsh advfirewall firewall add rule name="TileServer8081" dir=in action=allow protocol=TCP localport=8081
 ```
 
 Test from your client PC's browser:
 ```
-http://172.18.1.174:3000/data/buildings.json
+http://172.18.1.174:8081/data/buildings.json
 ```
 
 ### 1.8 Keep the tile server running (optional — no CMD window)
 
 ```cmd
 npm install -g pm2
-pm2 start "tileserver-gl-light C:\HPC\tiles\buildings.mbtiles --port 3000" --name tiles
+pm2 start "tileserver-gl --config C:\HPC\tiles\config.json --port 8081 --public_url http://172.18.1.174:8081" --name tiles
 pm2 save
 pm2 startup windowsservice
 ```
@@ -189,7 +203,7 @@ WMS for other layers:
 GEOSERVER_URL=http://172.18.1.151:8080
 
 # add this
-TILE_SERVER_URL=http://172.18.1.174:3000
+TILE_SERVER_URL=http://172.18.1.174:8081
 ```
 
 ### 2.2 client/src/utils/buildingData.js
@@ -200,10 +214,10 @@ their own per-district tile URL — same naming pattern as the MBTiles files:
 ```js
 // buildingData.js
 // Each district has its own MBTiles file served by tileserver-gl.
-// URL pattern: http://HPC:3000/data/<District>_buildings/{z}/{x}/{y}.pbf
+// URL pattern: http://HPC:8081/data/<District>_buildings/{z}/{x}/{y}.pbf
 
 const TILE_SERVER = import.meta.env.VITE_TILE_SERVER_URL
-  || 'http://172.18.1.174:3000';
+  || 'http://172.18.1.174:8081';
 
 export function buildingTileUrl(districtKey) {
   // districtKey = "Abbottabad" → "Abbottabad_buildings"
@@ -693,7 +707,8 @@ These endpoints return GeoJSON directly — same API contract as before, so
 
 ```cmd
 :: Terminal 1 — tile server
-tileserver-gl-light C:\HPC\tiles\buildings.mbtiles --port 3000
+cd C:\HPC\tiles
+tileserver-gl --config config.json --port 8081 --public_url http://172.18.1.174:8081
 
 :: Terminal 2 — Python analysis backend (if running on HPC)
 cd C:\path\to\infra_portal\pybackend
@@ -707,14 +722,14 @@ python app.py
 # Install dependencies (first time)
 cd infra_portal
 cp .env.example .env
-# Edit .env: set MAPBOX_TOKEN, TILE_SERVER_URL=http://172.18.1.174:3000, BUILDINGS_DIR
+# Edit .env: set MAPBOX_TOKEN, TILE_SERVER_URL=http://172.18.1.174:8081, BUILDINGS_DIR
 
 # Start everything
 npm run start        # or ./start.sh
 ```
 
 The Vite dev server proxies `/pyapi/` to `http://localhost:7543` (Python backend)
-and the tile source hits `http://172.18.1.174:3000` directly.
+and the tile source hits `http://172.18.1.174:8081` directly.
 
 ---
 
@@ -735,9 +750,10 @@ and the tile source hits `http://172.18.1.174:3000` directly.
 
 ## Troubleshooting
 
-**`tileserver-gl-light: command not found` (Windows CMD)**
+**`tileserver-gl: command not found` (Windows CMD)**
 ```cmd
 npm install -g tileserver-gl-light
+:: The package is tileserver-gl-light but the binary installed is tileserver-gl
 :: If npm is not found: install Node.js from nodejs.org first
 ```
 
@@ -757,10 +773,10 @@ The script sets `district` = filename stem before `_buildings` (e.g. `Abbottabad
 The app's `districtKey` comes from the CSV: `Abbottabad_buildings.shp` → `Abbottabad`.
 These must be identical. Check both by adding a `console.log(districtKey)` in MapContainer.
 
-**Client can't reach `172.18.1.174:3000`**
+**Client can't reach `172.18.1.174:8081`**
 ```cmd
 :: On HPC, run as Administrator:
-netsh advfirewall firewall add rule name="TileServer3000" dir=in action=allow protocol=TCP localport=3000
+netsh advfirewall firewall add rule name="TileServer8081" dir=in action=allow protocol=TCP localport=8081
 :: Verify HPC IP hasn't changed:
 ipconfig
 ```
